@@ -137,6 +137,12 @@ describe('GoogleDrive backend', () => {
       await expect(gdrive.getItemURL(PUBLIC_PATH)).to.be.rejectedWith('Could not set public permission');
     });
 
+    it("rejects when the file ID cannot be resolved", async () => {
+      sandbox.stub(gdrive, '_getFileId').resolves(undefined);
+
+      await expect(gdrive.getItemURL(PUBLIC_PATH)).to.be.rejectedWith('Could not get file ID');
+    });
+
     it("rejects when fetching metadata fails", async () => {
       fetchMock.mock(
         { name: 'postPermission', method: 'POST', url: PERMISSIONS_URL },
