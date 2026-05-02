@@ -129,6 +129,7 @@ class GoogleDrive extends RemoteBase implements Remote {
   token: string;
 
   _fileIdCache: FileIdCache;
+  _itemRefs: { [key: string]: string };
 
   constructor(remoteStorage, clientId) {
     super(remoteStorage);
@@ -139,6 +140,7 @@ class GoogleDrive extends RemoteBase implements Remote {
     this.clientId = clientId;
 
     this._fileIdCache = new FileIdCache(60 * 5); // IDs expire after 5 minutes (is this a good idea?)
+    this._itemRefs = {};
 
     hasLocalStorage = localStorageAvailable();
 
@@ -147,6 +149,7 @@ class GoogleDrive extends RemoteBase implements Remote {
       if (settings) {
         this.configure(settings);
       }
+      this._itemRefs = getJSONFromLocalStorage(`${SETTINGS_KEY}:shares`) || {};
     }
   }
 
@@ -703,15 +706,69 @@ class GoogleDrive extends RemoteBase implements Remote {
    * @protected
    */
   /**
-   * Google Drive does not support unauthenticated public file access, so
-   * this always resolves to ``undefined``. See GitHub issue #1051 for the
-   * full discussion.
+   * Make a file publicly readable and return its shareable URL.
+   *
+   * Sets an "anyone/reader" permission on the file via the Drive API, then
+   * returns the ``webViewLink``. The URL is cached in localStorage so
+   * subsequent calls do not make additional API requests.
+   *
+   * @param path - Absolute storage path (not module-relative)
+   * @returns Promise resolving to the public URL
+   *
+   * @private
+   */
+  async _share (path: string): Promise<string> {
+    const fileId = await this._getFileId(googleDrivePath(path));
+    if (!fileId) {
+      return Promise.reject(new Error(`Could not get file ID for path: ${path}`));
+    }
+
+    // Set anyone/reader permission (idempotent — Drive ignores duplicates with 400)
+    const permUrl = `${BASE_URL}/drive/v2/files/${fileId}/permissions`;
+    const permResp = await this._request('POST', permUrl, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    });
+    if (permResp.status !== 200 && permResp.status !== 400) {
+      return Promise.reject(new Error(`Could not set public permission for "${path}": HTTP ${permResp.status}`));
+    }
+
+    // Fetch webViewLink from file metadata
+    const metaUrl = `${BASE_URL}/drive/v2/files/${fileId}?fields=webViewLink`;
+    const metaResp = await this._request('GET', metaUrl, {});
+    if (metaResp.status !== 200) {
+      return Promise.reject(new Error(`Could not get metadata for "${path}": HTTP ${metaResp.status}`));
+    }
+
+    const meta = JSON.parse(metaResp.responseText);
+    const url: string = meta.webViewLink;
+
+    this._itemRefs[path] = url;
+    if (hasLocalStorage) {
+      localStorage.setItem(`${SETTINGS_KEY}:shares`, JSON.stringify(this._itemRefs));
+    }
+
+    return url;
+  }
+
+  /**
+   * Retrieve the publicly-accessible URL for a file in the ``/public/``
+   * folder. On first call the file is made world-readable via the Google
+   * Drive permissions API; subsequent calls return the cached URL.
+   *
+   * Returns ``undefined`` for paths outside ``/public/`` because Google
+   * Drive has no concept of unauthenticated access for arbitrary files.
    *
    * Implements {@link Remote.getItemURL}.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getItemURL (_path: string): Promise<string | undefined> {
-    return undefined;
+  async getItemURL (path: string): Promise<string | undefined> {
+    if (!path.match(/^\/public\/.*[^/]$/)) {
+      return undefined;
+    }
+    if (this._itemRefs[path]) {
+      return this._itemRefs[path];
+    }
+    return this._share(path);
   }
 
   static _rs_init (remoteStorage): void {
