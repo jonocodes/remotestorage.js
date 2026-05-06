@@ -21,10 +21,15 @@ Two modes are supported:
 
 ### Mode 1: GitHub App + PKCE (full OAuth, browser-only, recommended)
 
-GitHub Apps with SPA support (available in Preview since Aug 2025) enable a
-complete browser-only OAuth flow with PKCE — no server, no client secret, no
+GitHub Apps with [SPA support (Preview, Aug 2025 — roadmap #1153)](https://github.com/github/roadmap/issues/1153)
+enable a complete browser-only OAuth flow with PKCE — no server, no client secret, no
 proxy needed. CORS is enabled on the token endpoint for SPA clients, and token
 expiration + refresh are handled automatically.
+
+> **Preview status:** as of May 2026 the SPA CORS feature is not yet generally accessible — the
+> GitHub App registration UI has no option to mark a callback URL as a SPA client. If you hit a
+> CORS NetworkError on token exchange, fall back to Mode 2. See
+> [docs/github-oauth-status.md](github-oauth-status.md) for the full research history.
 
 **Setup — create a GitHub App:**
 
@@ -36,6 +41,9 @@ expiration + refresh are handled automatically.
 6. Under **User authorization tokens**, ensure **Expire user authorization tokens** is **checked** — required for SPA mode
 7. Click **Create GitHub App**
 8. Copy the **Client ID** shown on the app's settings page (do **not** generate a client secret)
+
+> **"You must generate a private key"** — ignore this prompt. Private keys are for server-to-server
+> (installation) auth, which we don't use. The OAuth user authorization flow only needs the Client ID.
 
 **Configure:**
 
@@ -55,9 +63,6 @@ The connect widget will show a GitHub option. Clicking it starts the PKCE
 redirect flow. On return, the code is exchanged for a token directly in the
 browser — no server involved.
 
-> **Note:** GitHub App SPA support is in Preview. If you encounter a CORS error
-> on the token exchange, the preview may not be active for your account yet —
-> use Mode 2 as a fallback.
 
 ---
 
@@ -175,7 +180,7 @@ Drive store their OAuth tokens.
 
 - **Experimental** — API and behavior may change
 - **Public repos only** in this release; private repos planned
-- **GitHub App SPA support is in Preview** — if CORS on the token exchange fails, fall back to PAT mode
+- **GitHub App SPA support is in Preview** ([roadmap #1153](https://github.com/github/roadmap/issues/1153), [community discussion #40077](https://github.com/orgs/community/discussions/40077)) — if CORS on the token exchange fails, fall back to PAT mode. See [docs/github-oauth-status.md](github-oauth-status.md)
 - **One commit per write** — not suitable for high-frequency sync
 - **No Content-Type round-trip** — content type is inferred on read (JSON detection), not stored as metadata
 - **Conflicts are surfaced, not merged** — concurrent writes produce 412 responses; the sync layer handles retry
@@ -184,8 +189,11 @@ Drive store their OAuth tokens.
 ## Troubleshooting
 
 **CORS error on token exchange**
-You're likely using an OAuth App, not a GitHub App. Create a GitHub App (see
-Mode 1 above). Alternatively, use PAT mode.
+If using an OAuth App: these permanently block CORS on the token endpoint — switch to a GitHub App
+([isaacs/github #330](https://github.com/isaacs/github/issues/330)). If already using a GitHub App:
+the SPA Preview CORS feature ([roadmap #1153](https://github.com/github/roadmap/issues/1153)) is not
+yet generally available. Use PAT mode as a fallback. See [docs/github-oauth-status.md](github-oauth-status.md)
+for the full picture.
 
 **"Could not fetch GitHub user info"**
 The token is invalid or has expired. Generate a new PAT, or re-authorize via
