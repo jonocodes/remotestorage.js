@@ -363,7 +363,7 @@ export class Authorize {
           'POST',
           remoteStorage.remote.TOKEN_URL,
           {
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'},
             body: formValues.toString(),
             responseType: 'json'
           }

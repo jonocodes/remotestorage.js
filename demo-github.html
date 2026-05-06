@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>remoteStorage – GitHub backend demo</title>
+  <script src="release/remotestorage.js"></script>
+  <script src="https://unpkg.com/remotestorage-widget@latest/build/widget.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+    button { margin: 0.25rem 0.25rem 0.25rem 0; padding: 0.4rem 0.8rem; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; min-height: 3rem; white-space: pre-wrap; }
+    label { display: block; margin: 0.25rem 0 0.1rem; font-size: 0.9rem; }
+    input { width: 100%; box-sizing: border-box; padding: 0.3rem; margin-bottom: 0.5rem; font-size: 0.95rem; }
+    #setup { border: 1px solid #ccc; border-radius: 4px; padding: 1rem; margin-bottom: 1rem; }
+    #setup h2 { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <h1>remoteStorage – GitHub backend demo</h1>
+
+  <div id="setup">
+    <h2>Config</h2>
+    <label>Personal Access Token (<a href="https://github.com/settings/tokens/new?scopes=public_repo" target="_blank">create one</a> with <code>public_repo</code> scope)</label>
+    <input id="pat" type="password" placeholder="ghp_…">
+    <label>Owner (username or org)</label>
+    <input id="owner" value="jonocodes">
+    <label>Repo</label>
+    <input id="repo" placeholder="rs-storage" value="rs-storage">
+    <label>Branch</label>
+    <input id="branch" placeholder="main" value="main">
+    <label>Root path in repo</label>
+    <input id="root" placeholder="remoteStorage/" value="remoteStorage/">
+    <button id="applyConfig">Connect</button>
+  </div>
+
+  <div id="widget-container"></div>
+  <button id="disconnect" style="display:none;margin-bottom:1rem">Disconnect</button>
+
+  <hr>
+  <button id="write">Write test file</button>
+  <button id="read">Read test file</button>
+  <button id="del">Delete test file</button>
+  <pre id="output">Output will appear here…</pre>
+  <pre id="log" style="font-size:0.8rem;max-height:300px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;padding:1rem;border-radius:4px;"></pre>
+
+  <script>
+    let remoteStorage, client;
+
+    // ── logging ──────────────────────────────────────────────────────────────
+    const logEl = document.getElementById('log');
+    function log(msg) {
+      document.getElementById('output').textContent = msg;
+    }
+    function dbg(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      console.log('[demo]', line);
+      logEl.textContent += line + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ── dump localStorage on load ─────────────────────────────────────────────
+    dbg('=== page load ===');
+    dbg('localStorage:backend      =', localStorage.getItem('remotestorage:backend'));
+    dbg('localStorage:api-keys     =', localStorage.getItem('remotestorage:api-keys'));
+    dbg('localStorage:github       =', localStorage.getItem('remotestorage:github'));
+    dbg('sessionStorage:codeVerifier =', sessionStorage.getItem('remotestorage:github:codeVerifier'));
+    dbg('URL hash =', location.hash || '(none)');
+    dbg('URL search =', location.search || '(none)');
+
+    // ── patch fetch to log GitHub API calls ───────────────────────────────────
+    const _fetch = window.fetch.bind(window);
+    window.fetch = async (url, opts = {}) => {
+      if (String(url).includes('github.com') || String(url).includes('api.github.com')) {
+        dbg('→ fetch', opts.method || 'GET', url);
+      }
+      try {
+        const res = await _fetch(url, opts);
+        if (String(url).includes('github.com') || String(url).includes('api.github.com')) {
+          dbg('← fetch', res.status, url);
+          if (!res.ok) {
+            const clone = res.clone();
+            clone.text().then(t => dbg('  body:', t.slice(0, 200)));
+          }
+        }
+        return res;
+      } catch (e) {
+        if (String(url).includes('github.com') || String(url).includes('api.github.com')) {
+          dbg('✗ fetch error', url, e.message);
+        }
+        throw e;
+      }
+    };
+
+    // ── setup ─────────────────────────────────────────────────────────────────
+    document.getElementById('applyConfig').onclick = () => {
+      const token  = document.getElementById('pat').value.trim();
+      const owner  = document.getElementById('owner').value.trim();
+      const repo   = document.getElementById('repo').value.trim();
+      const branch = document.getElementById('branch').value.trim() || 'main';
+      const root   = document.getElementById('root').value.trim() || 'remoteStorage/';
+
+      if (!token || !owner || !repo) {
+        log('Please fill in Token, Owner, and Repo.'); return;
+      }
+
+      if (remoteStorage) { remoteStorage.stopSync(); remoteStorage.disconnect(); }
+
+      remoteStorage = new RemoteStorage({ logging: true });
+      remoteStorage.setApiKeys({ github: { token, owner, repo, branch, root } });
+      remoteStorage.access.claim('demo', 'rw');
+      remoteStorage.caching.enable('/demo/');
+
+      remoteStorage.on('ready',           () => {
+        dbg('EVENT ready — backend=' + remoteStorage.backend + ' remote=' + remoteStorage.remote?.constructor?.name);
+        dbg('  rs.github exists?', !!remoteStorage.github);
+        dbg('  rs.remote === rs.github?', remoteStorage.remote === remoteStorage.github);
+      });
+      remoteStorage.on('connected',       () => {
+        dbg('EVENT connected — userAddress=' + remoteStorage.remote?.userAddress);
+        dbg('  remote type:', remoteStorage.remote?.constructor?.name);
+        log('Connected as: ' + remoteStorage.remote?.userAddress);
+      });
+      remoteStorage.on('not-connected',   () => dbg('EVENT not-connected'));
+      remoteStorage.on('disconnected',    () => { dbg('EVENT disconnected'); log('Disconnected.'); });
+      remoteStorage.on('error',           (e) => { dbg('EVENT error:', e?.message || String(e)); log('Error: ' + (e?.message || e)); });
+      remoteStorage.on('network-offline', () => { dbg('EVENT network-offline'); log('Offline.'); });
+      remoteStorage.on('network-online',  () => { dbg('EVENT network-online'); log('Back online.'); });
+      remoteStorage.on('wire-busy',       (e) => dbg('EVENT wire-busy', e?.method, e?.isFolder ? '(folder)' : ''));
+      remoteStorage.on('wire-done',       (e) => dbg('EVENT wire-done', e?.method, 'success=' + e?.success));
+      remoteStorage.on('sync-req-done',   (e) => dbg('EVENT sync-req-done', JSON.stringify(e)));
+      remoteStorage.on('sync-done',       (e) => dbg('EVENT sync-done', JSON.stringify(e)));
+
+      client = remoteStorage.scope('/demo/');
+
+      const container = document.getElementById('widget-container');
+      container.innerHTML = '';
+      const widget = new Widget(remoteStorage);
+      widget.attach('widget-container');
+
+      document.getElementById('disconnect').style.display = 'inline';
+
+      dbg('config applied — owner=' + owner + ' repo=' + repo);
+      log('Connecting…');
+    };
+
+    document.getElementById('disconnect').onclick = () => {
+      if (!remoteStorage) return;
+      remoteStorage.disconnect();
+      dbg('disconnected');
+      log('Disconnected.');
+    };
+
+    document.getElementById('write').onclick = async () => {
+      if (!client) { log('Apply config first.'); return; }
+      dbg('write: remote type =', remoteStorage.remote?.constructor?.name);
+      dbg('write: github token =', remoteStorage.github?.token ? 'present' : 'missing');
+      try {
+        const result = await client.storeFile('application/json', 'hello.json', JSON.stringify({
+          message: 'Hello from rs.js!',
+          ts: new Date().toISOString()
+        }, null, 2));
+        dbg('storeFile result:', JSON.stringify(result));
+        log('Written hello.json');
+      } catch (e) { dbg('write error:', e.message); log('Write error: ' + e); }
+    };
+
+    document.getElementById('read').onclick = async () => {
+      if (!client) { log('Apply config first.'); return; }
+      try {
+        const file = await client.getFile('hello.json');
+        dbg('getFile result:', JSON.stringify({ data: file?.data?.slice?.(0,100), contentType: file?.contentType }));
+        log(file?.data ?? '(file not found)');
+      } catch (e) { dbg('read error:', e.message); log('Read error: ' + e); }
+    };
+
+    document.getElementById('del').onclick = async () => {
+      if (!client) { log('Apply config first.'); return; }
+      try {
+        await client.remove('hello.json');
+        dbg('delete done');
+        log('Deleted hello.json');
+      } catch (e) { dbg('delete error:', e.message); log('Delete error: ' + e); }
+    };
+  </script>
+</body>
+</html>

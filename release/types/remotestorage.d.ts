@@ -7,6 +7,8 @@ import LocalStorage from './localstorage';
 import { EventHandling, EventHandler } from './eventhandling';
 import GoogleDrive from './googledrive';
 import Dropbox from './dropbox';
+import GitHub from './github';
+type GitHubConfig = GitHub.Config;
 import SyncError from './sync-error';
 import UnauthorizedError from './unauthorized-error';
 import { Remote } from "./remote";
@@ -58,7 +60,8 @@ export interface RSModule {
 }
 declare enum ApiKeyType {
     GOOGLE = "googledrive",
-    DROPBOX = "dropbox"
+    DROPBOX = "dropbox",
+    GITHUB = "github"
 }
 /**
  * Create a `remoteStorage` class instance so:
@@ -271,6 +274,7 @@ export declare class RemoteStorage {
         dropbox?: {
             appKey: string;
         };
+        github?: GitHubConfig;
     };
     /**
      * Managing claimed access scopes
@@ -306,7 +310,7 @@ export declare class RemoteStorage {
     delete: Function;
     /**
      */
-    backend?: 'remotestorage' | 'dropbox' | 'googledrive';
+    backend?: 'remotestorage' | 'dropbox' | 'googledrive' | 'github';
     /**
      * Depending on the chosen backend, this is either an instance of `WireClient`,
      * `Dropbox` or `GoogleDrive`.
@@ -427,7 +431,7 @@ export declare class RemoteStorage {
     /**
      * @internal
      */
-    setBackend(backendType?: 'remotestorage' | 'dropbox' | 'googledrive'): void;
+    setBackend(backendType?: 'remotestorage' | 'dropbox' | 'googledrive' | 'github'): void;
     _rememberPendingScope(scope?: string): void;
     _forgetPendingScope(): void;
     _rememberAuthorizedScope(scope?: string): void;
@@ -476,18 +480,19 @@ export declare class RemoteStorage {
      */
     log(...args: any[]): void;
     /**
-     * Set the OAuth key/ID for GoogleDrive and/or Dropbox backend support.
+     * Set the OAuth key/ID for GoogleDrive, Dropbox, and/or GitHub backend support.
      *
      * @param apiKeys - A config object
      *
      * @example
      * remoteStorage.setApiKeys({
      *   dropbox: 'your-app-key',
-     *   googledrive: 'your-client-id'
+     *   googledrive: 'your-client-id',
+     *   github: { clientId: '...', owner: '...', repo: '...', branch: 'main', root: 'rs/' }
      * });
      */
     setApiKeys(apiKeys: {
-        [key in ApiKeyType]?: string;
+        [key in ApiKeyType]?: string | GitHubConfig;
     }): void | boolean;
     /**
      * Set redirect URI to be used for the OAuth redirect within the
