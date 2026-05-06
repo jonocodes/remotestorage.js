@@ -1,9 +1,9 @@
-# Offering Dropbox and Google Drive storage options
+# Offering Dropbox, Google Drive, and GitHub storage options
 
 ![Screenshot of the connect-widget choose-backend screen](./images/screenshot-widget-choose.png){width="50%"}
 
-rs.js has optional support for syncing data with Dropbox and Google
-Drive instead of a RemoteStorage server.
+rs.js has optional support for syncing data with Dropbox, Google Drive,
+or GitHub instead of a RemoteStorage server.
 
 There are a few drawbacks, mostly sync performance and the lack of a
 permission model. So apps can usually access all of a user's storage
@@ -13,15 +13,19 @@ protocol, we find it helpful to let users choose something they already
 know, and potentially migrate to an RS account later on.
 
 For these additional backends to work, you will have to register your
-app with Dropbox and/or Google first. Then you can configure your OAuth
+app with the respective service first. Then you can configure your OAuth
 app ID/key like so:
 
 ```js
 remoteStorage.setApiKeys({
   dropbox: 'your-app-key',
-  googledrive: 'your-client-id'
+  googledrive: 'your-client-id',
+  // GitHub takes a config object instead of a plain string:
+  github: { clientId: 'your-client-id', owner: 'you', repo: 'rs-storage', branch: 'main', root: 'remoteStorage/' }
 });
 ```
+
+See the [GitHub backend docs](./github.md) for full setup instructions.
 
 ::: info
 The [Connect widget](getting-started/connect-widget) will automatically show

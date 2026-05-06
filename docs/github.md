@@ -5,51 +5,97 @@ rs.js has experimental support for storing data in a GitHub repository using the
 or write maps to a GitHub API call; each write creates a commit in the repo.
 
 This backend is designed for **client-side only** apps — no server required.
-Auth is done with a GitHub Personal Access Token (PAT) passed directly in config.
 
 > **Experimental** — not recommended for production use. See [Known issues](#known-issues).
 
 ## Prerequisites
 
 - A GitHub repository to use as storage (public for MVP; private repos planned)
-- A GitHub **fine-grained Personal Access Token** scoped to that repo
+- Auth credentials — see [Authentication](#authentication) below
 
-## 1. Create a storage repo
+## Authentication
 
-Create the repository on GitHub before connecting. It must already exist — the
-backend does not auto-create it.
+Two modes are supported:
 
-## 2. Create a fine-grained Personal Access Token
+---
 
-1. Go to [GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
-2. Click **Generate new token**
-3. Set an expiration
-4. Under **Repository access**, choose **Only select repositories** and pick your storage repo
-5. Under **Permissions → Repository permissions**, set **Contents** to **Read and write**
-6. Generate and copy the token (`github_pat_…`)
+### Mode 1: GitHub App + PKCE (full OAuth, browser-only, recommended)
 
-Fine-grained tokens are scoped to one repo with one permission — much safer than
-a classic token.
+GitHub Apps with SPA support (available in Preview since Aug 2025) enable a
+complete browser-only OAuth flow with PKCE — no server, no client secret, no
+proxy needed. CORS is enabled on the token endpoint for SPA clients, and token
+expiration + refresh are handled automatically.
 
-## 3. Configure the backend
+**Setup — create a GitHub App:**
+
+1. Go to [github.com/settings/apps/new](https://github.com/settings/apps/new)
+2. Fill in **GitHub App name** and **Homepage URL**
+3. Set **Callback URL** to your app's URL (e.g. `http://localhost:8000`)
+4. Uncheck **Active** under Webhook (not needed)
+5. Under **Repository permissions**, set **Contents → Read and write**
+6. Under **User authorization tokens**, ensure **Expire user authorization tokens** is **checked** — required for SPA mode
+7. Click **Create GitHub App**
+8. Copy the **Client ID** shown on the app's settings page (do **not** generate a client secret)
+
+**Configure:**
 
 ```js
 remoteStorage.setApiKeys({
   github: {
-    token:  'github_pat_YOUR_TOKEN',
-    owner:  'username-or-org',
-    repo:   'rs-storage',
-    branch: 'main',          // optional, defaults to 'main'
-    root:   'remoteStorage/' // optional, defaults to repo root
+    clientId: 'Iv1.your_github_app_client_id',
+    owner:    'username-or-org',
+    repo:     'rs-storage',
+    branch:   'main',          // optional, defaults to 'main'
+    root:     'remoteStorage/' // optional, defaults to repo root
   }
 });
 ```
 
-That's it — no OAuth app, no redirect, no server. The backend connects automatically.
+The connect widget will show a GitHub option. Clicking it starts the PKCE
+redirect flow. On return, the code is exchanged for a token directly in the
+browser — no server involved.
+
+> **Note:** GitHub App SPA support is in Preview. If you encounter a CORS error
+> on the token exchange, the preview may not be active for your account yet —
+> use Mode 2 as a fallback.
+
+---
+
+### Mode 2: Personal Access Token (simpler, no redirect)
+
+A fine-grained PAT scoped to one repo requires no app registration and no
+redirect flow — it connects immediately on load. Good for personal tools,
+scripts, and testing.
+
+**Setup:**
+
+1. Go to [github.com/settings/tokens?type=beta](https://github.com/settings/tokens?type=beta)
+2. Click **Generate new token**, set an expiration
+3. Under **Repository access**, select your storage repo only
+4. Under **Permissions → Contents**, set **Read and write**
+5. Generate and copy the token (`github_pat_…`)
+
+**Configure:**
+
+```js
+remoteStorage.setApiKeys({
+  github: {
+    token:  'github_pat_...',
+    owner:  'username-or-org',
+    repo:   'rs-storage',
+    branch: 'main',          // optional
+    root:   'remoteStorage/' // optional
+  }
+});
+```
+
+No redirect, no widget interaction needed — connects automatically on load.
+
+---
 
 ## Trying it locally in 5 minutes
 
-Save this as `index.html` and serve it with any static file server:
+Save this as `index.html`, fill in your credentials, and serve with any static file server:
 
 ```html
 <!DOCTYPE html>
@@ -67,12 +113,12 @@ Save this as `index.html` and serve it with any static file server:
   <script>
     const remoteStorage = new RemoteStorage({ logging: true });
 
+    // Mode 2: PAT — replace with your values
     remoteStorage.setApiKeys({
       github: {
-        token:  'github_pat_YOUR_TOKEN',
-        owner:  'YOUR_USERNAME',
+        token:  'github_pat_...',
+        owner:  'your-username',
         repo:   'rs-storage',
-        branch: 'main',
         root:   'remoteStorage/',
       }
     });
@@ -103,9 +149,6 @@ Save this as `index.html` and serve it with any static file server:
 npx serve .    # or: python3 -m http.server 8000
 ```
 
-Click **Write test file** — a commit will appear in your repo under
-`remoteStorage/demo/hello.json`.
-
 ## Storage mapping
 
 | rs.js operation | GitHub API call |
@@ -119,21 +162,20 @@ The file `sha` returned by GitHub is used as the rs.js revision token (ETag).
 
 ## Security model
 
-The PAT is the credential. To keep it safe:
+**GitHub App + PKCE:** tokens are short-lived (8 hours), scoped to what the
+user authorized, and automatically refreshed. No credential is stored in source
+code — only a transient token in `localStorage`.
 
-- Use a **fine-grained token** scoped to one repo with Contents read/write only
-- Set a token **expiration date** and rotate it periodically
-- Don't hardcode the token in source code — load it from user input or a secret store
-
-This is the same security posture as any API-key-based storage backend. The token
-is stored in `localStorage` under `remotestorage:github`, the same way Dropbox
-and Google Drive store their OAuth tokens.
+**PAT mode:** use a fine-grained token scoped to one repo with Contents
+read/write only, and set an expiration date. The token is stored in
+`localStorage` under `remotestorage:github`, the same way Dropbox and Google
+Drive store their OAuth tokens.
 
 ## Known issues
 
 - **Experimental** — API and behavior may change
 - **Public repos only** in this release; private repos planned
-- **No OAuth flow** — GitHub's token exchange endpoint blocks CORS, making browser-only OAuth impossible without a server proxy; PAT is the practical alternative
+- **GitHub App SPA support is in Preview** — if CORS on the token exchange fails, fall back to PAT mode
 - **One commit per write** — not suitable for high-frequency sync
 - **No Content-Type round-trip** — content type is inferred on read (JSON detection), not stored as metadata
 - **Conflicts are surfaced, not merged** — concurrent writes produce 412 responses; the sync layer handles retry
@@ -141,14 +183,20 @@ and Google Drive store their OAuth tokens.
 
 ## Troubleshooting
 
+**CORS error on token exchange**
+You're likely using an OAuth App, not a GitHub App. Create a GitHub App (see
+Mode 1 above). Alternatively, use PAT mode.
+
 **"Could not fetch GitHub user info"**
-The token is invalid or has expired. Generate a new fine-grained PAT.
+The token is invalid or has expired. Generate a new PAT, or re-authorize via
+the widget.
 
 **403 on write**
-The token doesn't have Contents write permission, or the wrong repo is configured.
+The token doesn't have Contents write permission for the configured repo.
 
 **409 / 412 conflicts on writes**
-Expected when two clients write the same file concurrently. The sync engine retries automatically.
+Expected when two clients write the same file concurrently. The sync engine
+retries automatically.
 
 **Files appear in wrong location**
 Check your `root` config. A root of `remoteStorage/` means files land at

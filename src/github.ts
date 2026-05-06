@@ -19,14 +19,32 @@ import UnauthorizedError from './unauthorized-error';
  * Uses the GitHub Contents API to store files in a repository.
  * Each write becomes a commit. Not suitable for high-frequency sync.
  *
+ * Two auth modes:
+ *
+ * 1. GitHub App + PKCE (recommended, browser-only OAuth):
+ *    Register a GitHub App at github.com/settings/apps with token expiration
+ *    enabled. Uses PKCE — no client secret required, no server needed.
+ *    Requires GitHub App SPA support (Preview, Aug 2025+).
+ *
  * @example
  * remoteStorage.setApiKeys({
  *   github: {
- *     clientId: 'your-oauth-app-client-id',
+ *     clientId: 'your-github-app-client-id',
  *     owner: 'username-or-org',
  *     repo: 'rs-storage',
  *     branch: 'main',
  *     root: 'remoteStorage/'
+ *   }
+ * });
+ *
+ * 2. Personal Access Token (simpler, no redirect):
+ *
+ * @example
+ * remoteStorage.setApiKeys({
+ *   github: {
+ *     token: 'github_pat_...',
+ *     owner: 'username-or-org',
+ *     repo: 'rs-storage',
  *   }
  * });
  */

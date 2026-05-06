@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>remoteStorage – GitHub PAT demo</title>
+  <script src="release/remotestorage.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    button { margin: 0.25rem 0.25rem 0.25rem 0; padding: 0.4rem 0.8rem; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; min-height: 3rem; white-space: pre-wrap; }
+    label { display: block; margin: 0.5rem 0 0.1rem; font-size: 0.9rem; font-weight: bold; }
+    input { width: 100%; box-sizing: border-box; padding: 0.3rem; margin-bottom: 0.25rem; font-size: 0.95rem; }
+    #disconnect { display: none; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>remoteStorage – GitHub PAT demo</h1>
+  <p>Uses a fine-grained Personal Access Token scoped to one repo — no OAuth redirect needed.</p>
+
+  <div id="setup">
+    <label>Personal Access Token</label>
+    <input id="pat" type="password" placeholder="github_pat_…">
+    <label>Owner</label>
+    <input id="owner" placeholder="your-username">
+    <label>Repo</label>
+    <input id="repo" placeholder="rs-storage" value="rs-storage">
+    <label>Branch</label>
+    <input id="branch" placeholder="main" value="main">
+    <label>Root path in repo</label>
+    <input id="root" placeholder="remoteStorage/" value="remoteStorage/">
+    <button id="connect">Connect</button>
+  </div>
+
+  <button id="disconnect">Disconnect</button>
+
+  <hr>
+  <button id="write">Write test file</button>
+  <button id="read">Read test file</button>
+  <button id="del">Delete test file</button>
+  <pre id="output">Output will appear here…</pre>
+  <pre id="log" style="font-size:0.8rem;max-height:300px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;padding:1rem;border-radius:4px;"></pre>
+
+  <script>
+    let remoteStorage, client;
+
+    function log(msg) { document.getElementById('output').textContent = msg; }
+    function dbg(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      console.log('[demo]', line);
+      const el = document.getElementById('log');
+      el.textContent += line + '\n';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    const _fetch = window.fetch.bind(window);
+    window.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes('github.com') || u.includes('api.github.com')) {
+        dbg('→ fetch', opts.method || 'GET', u);
+      }
+      try {
+        const res = await _fetch(url, opts);
+        if (u.includes('github.com') || u.includes('api.github.com')) {
+          dbg('← fetch', res.status, u);
+          if (!res.ok) res.clone().text().then(t => dbg('  body:', t.slice(0, 300)));
+        }
+        return res;
+      } catch (e) {
+        if (u.includes('github.com') || u.includes('api.github.com')) dbg('✗ fetch error', u, e.message);
+        throw e;
+      }
+    };
+
+    document.getElementById('connect').onclick = () => {
+      const token  = document.getElementById('pat').value.trim();
+      const owner  = document.getElementById('owner').value.trim();
+      const repo   = document.getElementById('repo').value.trim();
+      const branch = document.getElementById('branch').value.trim() || 'main';
+      const root   = document.getElementById('root').value.trim() || 'remoteStorage/';
+
+      if (!token || !owner || !repo) { log('Fill in Token, Owner, and Repo.'); return; }
+
+      if (remoteStorage) { remoteStorage.stopSync(); remoteStorage.disconnect(); }
+
+      remoteStorage = new RemoteStorage({ logging: true });
+      remoteStorage.setApiKeys({ github: { token, owner, repo, branch, root } });
+      remoteStorage.access.claim('demo', 'rw');
+      remoteStorage.caching.enable('/demo/');
+
+      remoteStorage.on('connected', () => {
+        dbg('connected as:', remoteStorage.remote?.userAddress);
+        log('Connected as: ' + remoteStorage.remote?.userAddress);
+        document.getElementById('setup').style.display = 'none';
+        document.getElementById('disconnect').style.display = 'inline';
+      });
+      remoteStorage.on('disconnected', () => { dbg('disconnected'); log('Disconnected.'); });
+      remoteStorage.on('error', e => { dbg('error:', e?.message || String(e)); log('Error: ' + (e?.message || e)); });
+      remoteStorage.on('wire-busy', e => dbg('wire-busy', e?.method));
+      remoteStorage.on('wire-done', e => dbg('wire-done', e?.method, 'ok=' + e?.success));
+
+      client = remoteStorage.scope('/demo/');
+      log('Connecting…');
+    };
+
+    document.getElementById('disconnect').onclick = () => {
+      if (!remoteStorage) return;
+      remoteStorage.disconnect();
+      document.getElementById('setup').style.display = 'block';
+      document.getElementById('disconnect').style.display = 'none';
+      log('Disconnected.');
+    };
+
+    document.getElementById('write').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        await client.storeFile('application/json', 'hello.json', JSON.stringify({
+          message: 'Hello from rs.js!',
+          ts: new Date().toISOString()
+        }, null, 2));
+        log('Written hello.json');
+      } catch (e) { dbg('write error:', e.message); log('Write error: ' + e); }
+    };
+
+    document.getElementById('read').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        const file = await client.getFile('hello.json');
+        log(file?.data ?? '(file not found)');
+      } catch (e) { dbg('read error:', e.message); log('Read error: ' + e); }
+    };
+
+    document.getElementById('del').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        await client.remove('hello.json');
+        log('Deleted hello.json');
+      } catch (e) { dbg('delete error:', e.message); log('Delete error: ' + e); }
+    };
+  </script>
+</body>
+</html>

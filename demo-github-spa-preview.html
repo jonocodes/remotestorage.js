@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>remoteStorage – GitHub App + PKCE demo (Preview)</title>
+  <script src="release/remotestorage.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    button { margin: 0.25rem 0.25rem 0.25rem 0; padding: 0.4rem 0.8rem; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 4px; min-height: 3rem; white-space: pre-wrap; }
+    label { display: block; margin: 0.5rem 0 0.1rem; font-size: 0.9rem; font-weight: bold; }
+    input { width: 100%; box-sizing: border-box; padding: 0.3rem; margin-bottom: 0.25rem; font-size: 0.95rem; }
+    .warning { background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .warning strong { display: block; margin-bottom: 0.25rem; }
+    #disconnect { display: none; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>remoteStorage – GitHub App + PKCE demo</h1>
+
+  <div class="warning">
+    <strong>Status: GitHub SPA Preview — not generally available as of May 2026</strong>
+    GitHub Apps SPA support (roadmap #1153) enables browser-only OAuth with PKCE and CORS on the
+    token endpoint. The feature exists in preview but the UI to enable it for your app's redirect
+    URI is not yet accessible. Expect a <strong>CORS NetworkError on token exchange</strong> until
+    GitHub makes this generally available. Use
+    <a href="demo-github-pat.html">demo-github-pat.html</a> as a working alternative.
+    See <a href="docs/github-oauth-status.md">docs/github-oauth-status.md</a> for full research notes.
+  </div>
+
+  <div id="setup">
+    <label>Client ID <small>(from your GitHub App settings page)</small></label>
+    <input id="clientId" placeholder="Iv1.xxxxxxxxxxxxxxxx">
+    <label>Owner</label>
+    <input id="owner" placeholder="your-username">
+    <label>Repo</label>
+    <input id="repo" placeholder="rs-storage" value="rs-storage">
+    <label>Branch</label>
+    <input id="branch" placeholder="main" value="main">
+    <label>Root path in repo</label>
+    <input id="root" placeholder="remoteStorage/" value="remoteStorage/">
+    <button id="connect" style="background:#24292f;color:#fff;border:none;border-radius:4px;padding:0.4rem 0.8rem;cursor:pointer">
+      Connect with GitHub →
+    </button>
+  </div>
+
+  <button id="disconnect">Disconnect</button>
+
+  <hr>
+  <button id="write">Write test file</button>
+  <button id="read">Read test file</button>
+  <button id="del">Delete test file</button>
+  <pre id="output">Output will appear here…</pre>
+  <pre id="log" style="font-size:0.8rem;max-height:300px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;padding:1rem;border-radius:4px;"></pre>
+
+  <script>
+    let remoteStorage, client;
+
+    function log(msg) { document.getElementById('output').textContent = msg; }
+    function dbg(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      console.log('[demo]', line);
+      const el = document.getElementById('log');
+      el.textContent += line + '\n';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    const _fetch = window.fetch.bind(window);
+    window.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes('github.com') || u.includes('api.github.com')) {
+        dbg('→ fetch', opts.method || 'GET', u);
+      }
+      try {
+        const res = await _fetch(url, opts);
+        if (u.includes('github.com') || u.includes('api.github.com')) {
+          dbg('← fetch', res.status, u);
+          if (!res.ok) res.clone().text().then(t => dbg('  body:', t.slice(0, 300)));
+        }
+        return res;
+      } catch (e) {
+        if (u.includes('github.com') || u.includes('api.github.com')) dbg('✗ fetch error', u, e.message);
+        throw e;
+      }
+    };
+
+    // ── page load: dump state, auto-reconnect after OAuth redirect ─────────────
+    dbg('=== page load ===');
+    dbg('backend      =', localStorage.getItem('remotestorage:backend'));
+    dbg('api-keys     =', localStorage.getItem('remotestorage:api-keys'));
+    dbg('github-token =', localStorage.getItem('remotestorage:github') ? 'present' : 'null');
+    dbg('codeVerifier =', sessionStorage.getItem('remotestorage:codeVerifier') ? 'present' : 'null');
+    dbg('URL search   =', location.search || '(none)');
+
+    // If returning from GitHub OAuth redirect, reconstruct RS from saved config
+    if (location.search.includes('code=')) {
+      dbg('OAuth callback detected — reconstructing RS from localStorage…');
+      const savedKeys = JSON.parse(localStorage.getItem('remotestorage:api-keys') || '{}');
+      if (savedKeys.github) {
+        initRS(savedKeys.github);
+        document.getElementById('setup').style.display = 'none';
+        log('Completing OAuth login… (may fail with CORS NetworkError — see warning above)');
+      } else {
+        dbg('No saved github config — cannot complete OAuth');
+      }
+    }
+
+    function initRS(config) {
+      if (remoteStorage) { remoteStorage.stopSync(); remoteStorage.disconnect(); }
+
+      remoteStorage = new RemoteStorage({ logging: true });
+      remoteStorage.setApiKeys({ github: config });
+      remoteStorage.access.claim('demo', 'rw');
+      remoteStorage.caching.enable('/demo/');
+
+      remoteStorage.on('connected', () => {
+        dbg('connected as:', remoteStorage.remote?.userAddress);
+        log('Connected as: ' + remoteStorage.remote?.userAddress);
+        document.getElementById('setup').style.display = 'none';
+        document.getElementById('disconnect').style.display = 'inline';
+        if (location.search.includes('code=')) {
+          history.replaceState({}, '', location.pathname);
+        }
+      });
+      remoteStorage.on('not-connected', () => dbg('not-connected'));
+      remoteStorage.on('disconnected',  () => { dbg('disconnected'); log('Disconnected.'); });
+      remoteStorage.on('error', e => { dbg('error:', e?.message || String(e)); log('Error: ' + (e?.message || e)); });
+      remoteStorage.on('wire-busy', e => dbg('wire-busy', e?.method));
+      remoteStorage.on('wire-done', e => dbg('wire-done', e?.method, 'ok=' + e?.success));
+
+      client = remoteStorage.scope('/demo/');
+    }
+
+    document.getElementById('connect').onclick = async () => {
+      const clientId = document.getElementById('clientId').value.trim();
+      const owner    = document.getElementById('owner').value.trim();
+      const repo     = document.getElementById('repo').value.trim();
+      const branch   = document.getElementById('branch').value.trim() || 'main';
+      const root     = document.getElementById('root').value.trim() || 'remoteStorage/';
+
+      if (!clientId || !owner || !repo) { log('Fill in Client ID, Owner, and Repo.'); return; }
+
+      initRS({ clientId, owner, repo, branch, root });
+      dbg('starting PKCE OAuth flow — redirecting to GitHub…');
+      try {
+        await remoteStorage.github.connect();
+        // Page redirects to GitHub; on return the page-load block above takes over
+      } catch (e) { dbg('connect error:', e.message); log('Error: ' + e); }
+    };
+
+    document.getElementById('disconnect').onclick = () => {
+      if (!remoteStorage) return;
+      remoteStorage.disconnect();
+      document.getElementById('setup').style.display = 'block';
+      document.getElementById('disconnect').style.display = 'none';
+      log('Disconnected.');
+    };
+
+    document.getElementById('write').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        await client.storeFile('application/json', 'hello.json', JSON.stringify({
+          message: 'Hello from rs.js!',
+          ts: new Date().toISOString()
+        }, null, 2));
+        log('Written hello.json');
+      } catch (e) { dbg('write error:', e.message); log('Write error: ' + e); }
+    };
+
+    document.getElementById('read').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        const file = await client.getFile('hello.json');
+        log(file?.data ?? '(file not found)');
+      } catch (e) { dbg('read error:', e.message); log('Read error: ' + e); }
+    };
+
+    document.getElementById('del').onclick = async () => {
+      if (!client) { log('Connect first.'); return; }
+      try {
+        await client.remove('hello.json');
+        log('Deleted hello.json');
+      } catch (e) { dbg('delete error:', e.message); log('Delete error: ' + e); }
+    };
+  </script>
+</body>
+</html>
