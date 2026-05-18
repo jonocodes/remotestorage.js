@@ -101,6 +101,25 @@ This is the only reliably working browser-only auth method as of May 2026.
 
 ---
 
+## Timeline
+
+- **Jul 2025** — GitHub ships PKCE support for GitHub Apps (Changelog). CORS on token endpoint
+  not included.
+- **Aug 2025** — Roadmap #1153 "Single page app support for GitHub Apps" published as Preview,
+  targeting Q4 2025 (Oct–Dec 2025). Describes CORS on `/access_token` for SPA-marked redirect URIs,
+  no client secret, refresh tokens with ~24h lifetime.
+- **Q4 2025 (missed)** — No GA announcement. Feature slipped past its original target quarter.
+- **May 2026 (researched now)** — Still in Preview. No ETA published. Community discussion #40077
+  confirms CORS is "still being worked on". The callback URL "mark as SPA client" UI option does
+  not appear anywhere in GitHub App settings. Token endpoint still returns CORS NetworkError from
+  a browser.
+
+**Important:** OAuth Apps cannot be used even when GitHub SPA ships — refresh tokens are a
+prerequisite for SPA mode and OAuth Apps do not support refresh tokens. Only GitHub Apps will
+ever support this flow.
+
+---
+
 ## What to watch for
 
 The GitHub App SPA Preview feature will become usable when **any of** the
@@ -135,5 +154,6 @@ App and enable SPA mode).
 - [Single page app support for GitHub Apps \[Preview\] — github/roadmap #1153](https://github.com/github/roadmap/issues/1153)
 - [Feedback: Authenticating with a SPA without a relay — community Discussion #40077](https://github.com/orgs/community/discussions/40077)
 - [OAuth web flow endpoints don't support CORS — isaacs/github Issue #330](https://github.com/isaacs/github/issues/330)
+- [About the user authorization callback URL — GitHub Docs](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-user-authorization-callback-url)
 - [Authorizing OAuth apps — GitHub Docs](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)
 - [Generating a user access token for a GitHub App — GitHub Docs](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
